@@ -1,5 +1,12 @@
 name: fcg-fase2
 
+# Variaveis de ambiente compartilhadas pelos tres servicos que emitem ou validam JWT
+# (users-api, catalog-api e payments-api). Cada um deles faz `<<: *jwt-environment` no seu
+# bloco `environment`, entao a mesma chave chega aos tres a partir de um unico lugar, o .env.
+# Sem valor padrao de proposito: se JWT__SIGNINGKEY estiver vazia, o compose nao sobe.
+x-jwt-environment: &jwt-environment
+  JWT__SIGNINGKEY: ${JWT__SIGNINGKEY:?defina JWT__SIGNINGKEY no .env (veja o .env.example)}
+
 services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
