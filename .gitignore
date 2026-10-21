@@ -1,0 +1,10 @@
+# variaveis locais (o .env.example e versionado, o .env nao)
+.env
+
+# dados locais dos containers, se algum volume for mapeado para pasta
+data/
+
+# IDEs e sistema
+.idea/
+.vscode/
+.DS_Store
