@@ -1,11 +1,37 @@
 name: fcg-fase2
 
+# Aplicacao completa com um unico comando:  docker compose up
+# (a primeira execucao constroi as quatro imagens a partir dos repositorios vizinhos, ../fcg-*-api;
+# as seguintes reaproveitam o cache de camadas). Pre-requisito: o .env com a JWT__SIGNINGKEY.
+
 # Variaveis de ambiente compartilhadas pelos tres servicos que emitem ou validam JWT
-# (users-api, catalog-api e payments-api). Cada um deles faz `<<: *jwt-environment` no seu
+# (users-api, catalog-api e payments-api). Cada um deles faz `<<: [*jwt-environment, ...]` no seu
 # bloco `environment`, entao a mesma chave chega aos tres a partir de um unico lugar, o .env.
 # Sem valor padrao de proposito: se JWT__SIGNINGKEY estiver vazia, o compose nao sobe.
 x-jwt-environment: &jwt-environment
   JWT__SIGNINGKEY: ${JWT__SIGNINGKEY:?defina JWT__SIGNINGKEY no .env (veja o .env.example)}
+
+# Acesso ao broker, igual para os quatro servicos. O nome `rabbitmq` e o da rede interna do compose.
+x-rabbitmq-environment: &rabbitmq-environment
+  RabbitMq__Host: rabbitmq
+  RabbitMq__Username: ${RABBITMQ_USER:-fcg}
+  RabbitMq__Password: ${RABBITMQ_PASSWORD:-fcg_password}
+
+# As imagens do ASP.NET nao trazem curl, entao a checagem de saude abre uma conexao TCP com o bash
+# e pede /health. Dentro do container a porta e sempre a 8080 (a do host e so a publicada).
+x-app-healthcheck: &app-healthcheck
+  test:
+    - CMD
+    - bash
+    - -c
+    - >-
+      exec 3<>/dev/tcp/127.0.0.1/8080
+      && printf 'GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
+      && head -n 1 <&3 | grep -q ' 200 '
+  interval: 10s
+  timeout: 5s
+  retries: 6
+  start_period: 30s
 
 services:
   rabbitmq:
@@ -45,6 +71,78 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  users-api:
+    build:
+      context: ../fcg-users-api
+    image: fcg-users-api:local
+    container_name: fcg2-users-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: [*jwt-environment, *rabbitmq-environment]
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=fcg_users;Username=${POSTGRES_USER:-fcg};Password=${POSTGRES_PASSWORD:-fcg_password}
+    ports:
+      - "${USERS_API_PORT:-5101}:8080"
+    healthcheck: *app-healthcheck
+
+  catalog-api:
+    build:
+      context: ../fcg-catalog-api
+    image: fcg-catalog-api:local
+    container_name: fcg2-catalog-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: [*jwt-environment, *rabbitmq-environment]
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=fcg_catalog;Username=${POSTGRES_USER:-fcg};Password=${POSTGRES_PASSWORD:-fcg_password}
+    ports:
+      - "${CATALOG_API_PORT:-5102}:8080"
+    healthcheck: *app-healthcheck
+
+  payments-api:
+    build:
+      context: ../fcg-payments-api
+    image: fcg-payments-api:local
+    container_name: fcg2-payments-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: [*jwt-environment, *rabbitmq-environment]
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=fcg_payments;Username=${POSTGRES_USER:-fcg};Password=${POSTGRES_PASSWORD:-fcg_password}
+      # Limite de aprovacao do pagamento simulado: aprova se o preco for menor ou igual a ele.
+      Payments__LimiteDeAprovacao: ${PAYMENTS_LIMITE_DE_APROVACAO:-200}
+    ports:
+      - "${PAYMENTS_API_PORT:-5103}:8080"
+    healthcheck: *app-healthcheck
+
+  # Sem banco e sem JWT: so consome eventos do broker e escreve os "e-mails" no log.
+  notifications-api:
+    build:
+      context: ../fcg-notifications-api
+    image: fcg-notifications-api:local
+    container_name: fcg2-notifications-api
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: *rabbitmq-environment
+    ports:
+      - "${NOTIFICATIONS_API_PORT:-5104}:8080"
+    healthcheck: *app-healthcheck
 
 volumes:
   fcg2-rabbitmq-data:
