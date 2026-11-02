@@ -1,0 +1,109 @@
+# RabbitMQ unico, com o painel de gerenciamento (15672). StatefulSet porque o RabbitMQ guarda os dados
+# em uma pasta com o nome do no (rabbit@<hostname>): com o nome estavel rabbitmq-0 o volume continua
+# valendo depois de recriar o pod, e as filas e mensagens retidas sobrevivem.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rabbitmq-credentials
+  namespace: fcg
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: fcg
+type: Opaque
+# Credenciais padrao de DESENVOLVIMENTO LOCAL (as mesmas do docker-compose.yml). Para qualquer outro
+# ambiente, troque aqui e nos Secrets dos servicos.
+stringData:
+  RABBITMQ_DEFAULT_USER: fcg
+  RABBITMQ_DEFAULT_PASS: fcg_password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: fcg
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: fcg
+spec:
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: fcg
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/part-of: fcg
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rabbitmq
+        app.kubernetes.io/part-of: fcg
+    spec:
+      # Um Service chamado rabbitmq faria o Kubernetes injetar RABBITMQ_PORT=tcp://..., que colide
+      # com as variaveis RABBITMQ_* que a propria imagem le.
+      enableServiceLinks: false
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-management-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          envFrom:
+            - secretRef:
+                name: rabbitmq-credentials
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          startupProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "ping"]
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: rabbitmq
+          app.kubernetes.io/part-of: fcg
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

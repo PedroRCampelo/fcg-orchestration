@@ -1,0 +1,8 @@
+# Namespace unico da aplicacao. Os manifestos dos servicos (nos repositorios de cada um, pasta k8s/)
+# e os desta pasta usam `namespace: fcg`, entao ele precisa existir antes de qualquer outro apply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fcg
+  labels:
+    app.kubernetes.io/part-of: fcg
